@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"golang.org/x/net/html"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -57,7 +58,7 @@ func inspectURLContent(url string) {
 		token := z.Token()
 		var links []string
 		if isStartAnchorTag(token, tokenType) {
-			link := extractLinksFromTag(token)
+			link := extractLinkFromTag(token)
 			links = append(links, link)
 			// Append into the queue of link
 			// Then send it to the Channel to Crawl them too
@@ -73,12 +74,31 @@ func isStartAnchorTag(token html.Token, tokenType html.TokenType) bool {
 	return tokenType == html.StartTagToken && token.DataAtom.String() == "a"
 }
 
-// extractLinksFromTag get the href value from the Tag
-func extractLinksFromTag(token html.Token) string {
+// extractLinkFromTag get the href value from the Tag
+func extractLinkFromTag(token html.Token) string {
 	for _, attr := range token.Attr {
 		if attr.Key == "href" {
-			return attr.Val
+			if link, isValid := validateLink(parserURL, attr.Val); isValid {
+				return link
+			} else {
+				// append to Found but NOT VALID
+
+			}
 		}
 	}
 	return ""
+}
+
+func validateLink(base, newURL string) (string, bool) {
+	base = strings.TrimSuffix(base, "/")
+
+	switch {
+	case strings.HasPrefix(newURL, base):
+		return newURL, true
+	// I got /career as a newURL (without baseURL) and It should be valid
+	case strings.HasPrefix(newURL, "/"):
+		return base + newURL, true
+	}
+	return newURL, false
+
 }
