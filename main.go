@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"golang.org/x/net/html"
 	"net/http"
@@ -9,46 +10,83 @@ import (
 	"time"
 )
 
-const parserURL = "https://parserdigital.com/"
+var crawler WebCrawler
 
 func main() {
+	crawler = NewWebCrawler()
 	fmt.Println("Hello Parser!")
-	fmt.Printf("Started at: %s", time.Now())
-	NewCrawler(parserURL)
-	fmt.Printf("Finished at: %s", time.Now())
+	fmt.Printf("Started at: %s\n", time.Now())
+	RunCrawler()
+	fmt.Printf("Finished at: %s\n", time.Now())
 }
 
-func NewCrawler(initialURL string) {
+type WebCrawler struct {
+	client       *http.Client
+	initialURL   string
+	nWorkers     int
+	crawledLinks []string
+	mx           sync.Mutex
+}
+
+func NewWebCrawler() WebCrawler {
+	var url string
+	var nWorkers int
+	flag.StringVar(&url, "url", "https://parserdigital.com/", "First URL to Crawl")
+	flag.IntVar(&nWorkers, "n", 10, "Number of max workers")
+
+	flag.Parse()
+	return WebCrawler{
+		client:       initClient(),
+		initialURL:   url,
+		nWorkers:     nWorkers,
+		crawledLinks: []string{},
+	}
+}
+
+func RunCrawler() {
 	pendingCountChannel := make(chan int)
 	pendingURLChannel := make(chan string)
 	crawledLinksChannel := make(chan string)
 
 	go func() {
-		crawledLinksChannel <- initialURL
+		crawledLinksChannel <- crawler.initialURL
 	}()
 
 	var wg sync.WaitGroup
 	go linkHandler(crawledLinksChannel, pendingURLChannel, pendingCountChannel)
-	go countDownAndCloseChannels(crawledLinksChannel, pendingURLChannel, pendingCountChannel)
+	go func() {
+		if countDownAndCloseChannels(pendingCountChannel) {
+			close(pendingURLChannel)
+			close(crawledLinksChannel)
+			close(pendingCountChannel)
+		}
+	}()
 
-	var maxWorkers = 10
-	for w := 1; w <= maxWorkers; w++ {
+	for w := 1; w <= crawler.nWorkers; w++ {
 		wg.Add(1)
-		go crawlLink(&wg, crawledLinksChannel, pendingURLChannel, pendingCountChannel, w)
+		go func(w int) {
+			defer wg.Done()
+			links := crawlLink(crawledLinksChannel, pendingURLChannel, pendingCountChannel)
+
+			crawler.mx.Lock()
+			defer crawler.mx.Unlock()
+			crawler.crawledLinks = append(crawler.crawledLinks, links...)
+		}(w)
+
 	}
 
 	wg.Wait()
+	fmt.Printf("%dx Workers found a total of %d valid Links:\n%+v\n\n", crawler.nWorkers, len(crawler.crawledLinks), crawler.crawledLinks)
 }
 
-func crawlLink(wg *sync.WaitGroup, crawledLinksChannel, pendingLinkChannel chan string, pendingCountChannel chan int, workerId int) {
+func crawlLink(crawledLinksChannel, pendingLinkChannel chan string, pendingCountChannel chan int) []string {
 	links := []string{}
 	for link := range pendingLinkChannel {
 		inspectURLContent(link, crawledLinksChannel)
 		pendingCountChannel <- -1
 		links = append(links, link)
 	}
-	fmt.Printf("Worker #%d - Found the following Links: %+v\n", workerId, links)
-	wg.Done()
+	return links
 }
 
 func linkHandler(crawledLinksChannel, pendingLinkChannel chan string, pendingCountChannel chan int) {
@@ -67,17 +105,16 @@ func linkHandler(crawledLinksChannel, pendingLinkChannel chan string, pendingCou
 
 }
 
-func countDownAndCloseChannels(crawledLinksChannel chan string, pendingLinkChannel chan string, pendingCountChannel chan int) {
+func countDownAndCloseChannels(pendingCountChannel chan int) bool {
 	count := 0
 	for c := range pendingCountChannel {
 		count += c
 		// If there are not more pending, then Close
 		if count == 0 {
-			close(pendingLinkChannel)
-			close(crawledLinksChannel)
-			close(pendingCountChannel)
+			return true
 		}
 	}
+	return false
 }
 
 // initClient will create our Client to do requests
@@ -90,9 +127,7 @@ func initClient() *http.Client {
 
 // getContentFromURL get the URLs content
 func getContentFromURL(url string) (*http.Response, error) {
-	client := initClient()
-
-	response, err := client.Get(url)
+	response, err := crawler.client.Get(url)
 	if err != nil {
 		fmt.Printf("Error while getting the Content from URL (%s) due to: %s", url, err)
 		return nil, err
@@ -144,11 +179,10 @@ func isStartAnchorTag(token html.Token, tokenType html.TokenType) bool {
 func extractLinkFromTag(token html.Token) string {
 	for _, attr := range token.Attr {
 		if attr.Key == "href" {
-			if link, isValid := validateLink(parserURL, attr.Val); isValid {
+			if link, isValid := validateLink(crawler.initialURL, attr.Val); isValid {
 				return link
 			} else {
-				// append to Found but NOT VALID
-
+				// OMIT - Do nothing
 			}
 		}
 	}
