@@ -19,6 +19,7 @@ func main() {
 }
 
 func NewCrawler(initialURL string) {
+	pendingCountChannel := make(chan int)
 	pendingURLChannel := make(chan string)
 	crawledLinksChannel := make(chan string)
 
@@ -27,41 +28,59 @@ func NewCrawler(initialURL string) {
 	}()
 
 	var wg sync.WaitGroup
-	go linkHandler(crawledLinksChannel, pendingURLChannel)
+	go linkHandler(crawledLinksChannel, pendingURLChannel, pendingCountChannel)
+	go countDownAndCloseChannels(crawledLinksChannel, pendingURLChannel, pendingCountChannel)
 
 	var maxWorkers = 10
-	for i := 0; i < maxWorkers; i++ {
+	for w := 1; w <= maxWorkers; w++ {
 		wg.Add(1)
-		go crawlLink(&wg, crawledLinksChannel, pendingURLChannel)
+		go crawlLink(&wg, crawledLinksChannel, pendingURLChannel, pendingCountChannel, w)
 	}
 
 	wg.Wait()
 }
 
-func crawlLink(wg *sync.WaitGroup, crawledLinksChannel, pendingLinkChannel chan string) {
+func crawlLink(wg *sync.WaitGroup, crawledLinksChannel, pendingLinkChannel chan string, pendingCountChannel chan int, workerId int) {
+	links := []string{}
 	for link := range pendingLinkChannel {
 		inspectURLContent(link, crawledLinksChannel)
+		pendingCountChannel <- -1
+		links = append(links, link)
 	}
-
+	fmt.Printf("Worker #%d - Found the following Links: %+v\n", workerId, links)
 	wg.Done()
 }
 
-func linkHandler(crawledLinksChannel, pendingLinkChannel chan string) {
+func linkHandler(crawledLinksChannel, pendingLinkChannel chan string, pendingCountChannel chan int) {
 	alreadyCrawled := make(map[string]bool)
+
 	for link := range crawledLinksChannel {
 		if !alreadyCrawled[link] {
 			// mark as crawled
 			alreadyCrawled[link] = true
-			fmt.Println(link)
+			//fmt.Println(link)
 			// send it to start crawling it
+			pendingCountChannel <- 1
 			pendingLinkChannel <- link
 		}
 	}
 
 }
 
+func countDownAndCloseChannels(crawledLinksChannel chan string, pendingLinkChannel chan string, pendingCountChannel chan int) {
+	count := 0
+	for c := range pendingCountChannel {
+		count += c
+		// If there are not more pending, then Close
+		if count == 0 {
+			close(pendingLinkChannel)
+			close(crawledLinksChannel)
+			close(pendingCountChannel)
+		}
+	}
+}
+
 // initClient will create our Client to do requests
-//
 // timeout is 100 secs
 func initClient() *http.Client {
 	return &http.Client{
@@ -99,13 +118,11 @@ func inspectURLContent(url string, crawledLinksChannel chan string) {
 		if tokenType == html.ErrorToken {
 			return
 		}
-
 		token := z.Token()
-		var links []string
+
 		if isStartAnchorTag(token, tokenType) {
 			link := extractLinkFromTag(token)
 
-			links = append(links, link)
 			// Append into the queue of link
 			// Then send it to the Channel to Crawl them too
 			if link != "" {
@@ -138,9 +155,9 @@ func extractLinkFromTag(token html.Token) string {
 	return ""
 }
 
+// validateLink check the URL is related to the base URL
 func validateLink(base, newURL string) (string, bool) {
 	base = strings.TrimSuffix(base, "/")
-
 	switch {
 	case strings.HasPrefix(newURL, base):
 		return newURL, true
