@@ -4,6 +4,10 @@ import "strings"
 
 // validateLink check the URL is related to the base URL
 func validateLink(base, newURL string) (string, bool) {
+	if base == "" {
+		// Invalid base
+		return newURL, false
+	}
 	base = strings.TrimSuffix(base, "/")
 	switch {
 	case strings.HasPrefix(newURL, base):

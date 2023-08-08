@@ -27,8 +27,8 @@ func getContentFromURL(url string) (*http.Response, error) {
 
 // inspectURLContent will connect to the URL
 // and inspect the HTML Content to extract link
-func inspectURLContent(url string, crawledLinksChannel chan string) {
-	response, err := getContentFromURL(url)
+func inspectURLContent(initialURL, currentLink string, crawledLinksChannel chan string) {
+	response, err := getContentFromURL(currentLink)
 	if err != nil {
 		fmt.Printf("%s - Error: %s", "inpectURLContent", err)
 		return
@@ -46,7 +46,7 @@ func inspectURLContent(url string, crawledLinksChannel chan string) {
 		token := z.Token()
 
 		if isStartAnchorToken(token, tokenType) {
-			link := extractLinkFromToken(token)
+			link := extractLinkFromToken(token, initialURL)
 
 			// Append into the queue of link
 			// Then send it to the Channel to Crawl them too

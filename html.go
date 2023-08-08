@@ -9,13 +9,11 @@ func isStartAnchorToken(token html.Token, tokenType html.TokenType) bool {
 }
 
 // extractLinkFromTag get the href value from the Tag
-func extractLinkFromToken(token html.Token) string {
+func extractLinkFromToken(token html.Token, initialURL string) string {
 	for _, attr := range token.Attr {
 		if attr.Key == "href" {
-			if link, isValid := validateLink(crawler.initialURL, attr.Val); isValid {
+			if link, isValid := validateLink(initialURL, attr.Val); isValid {
 				return link
-			} else {
-				// OMIT - Do nothing
 			}
 		}
 	}

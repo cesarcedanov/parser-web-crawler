@@ -70,7 +70,7 @@ func RunCrawler() {
 func crawlLink(crawledLinksChannel, pendingLinkChannel chan string, pendingCountChannel chan int) []string {
 	links := []string{}
 	for link := range pendingLinkChannel {
-		inspectURLContent(link, crawledLinksChannel)
+		inspectURLContent(crawler.initialURL, link, crawledLinksChannel)
 		pendingCountChannel <- -1
 		links = append(links, link)
 	}
