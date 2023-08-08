@@ -8,44 +8,47 @@ import (
 )
 
 type WebCrawler struct {
-	client       *http.Client
-	initialURL   string
-	nWorkers     int
-	crawledLinks []string
-	mx           sync.Mutex
+	client              *http.Client
+	initialURL          string
+	nWorkers            int
+	outputLinks         []string
+	crawledLinksChannel chan string
+	pendingURLChannel   chan string
+	pendingCountChannel chan int
+	mx                  sync.Mutex
 }
 
-func NewWebCrawler() WebCrawler {
+func NewWebCrawler() *WebCrawler {
 	var url string
 	var nWorkers int
 	flag.StringVar(&url, "url", "https://parserdigital.com/", "First URL to Crawl")
 	flag.IntVar(&nWorkers, "n", 10, "Number of max workers")
 
 	flag.Parse()
-	return WebCrawler{
-		client:       initClient(),
-		initialURL:   url,
-		nWorkers:     nWorkers,
-		crawledLinks: []string{},
+	return &WebCrawler{
+		client:              initClient(),
+		initialURL:          url,
+		nWorkers:            nWorkers,
+		outputLinks:         []string{},
+		crawledLinksChannel: make(chan string),
+		pendingURLChannel:   make(chan string),
+		pendingCountChannel: make(chan int),
 	}
 }
 
-func RunCrawler() {
-	pendingCountChannel := make(chan int)
-	pendingURLChannel := make(chan string)
-	crawledLinksChannel := make(chan string)
+func (cwl *WebCrawler) Run() {
 
 	go func() {
-		crawledLinksChannel <- crawler.initialURL
+		cwl.crawledLinksChannel <- crawler.initialURL
 	}()
 
 	var wg sync.WaitGroup
-	go linkHandler(crawledLinksChannel, pendingURLChannel, pendingCountChannel)
+	go cwl.LinkHandler()
 	go func() {
-		if countDownAndCloseChannels(pendingCountChannel) {
-			close(pendingURLChannel)
-			close(crawledLinksChannel)
-			close(pendingCountChannel)
+		if cwl.CountDown() {
+			close(cwl.pendingURLChannel)
+			close(cwl.crawledLinksChannel)
+			close(cwl.pendingCountChannel)
 		}
 	}()
 
@@ -55,47 +58,46 @@ func RunCrawler() {
 			defer wg.Done()
 			defer crawler.mx.Unlock()
 
-			links := crawlLink(crawledLinksChannel, pendingURLChannel, pendingCountChannel)
+			links := cwl.CrawlLinks()
 
 			crawler.mx.Lock()
-			crawler.crawledLinks = append(crawler.crawledLinks, links...)
+			crawler.outputLinks = append(crawler.outputLinks, links...)
 		}(w)
 
 	}
 
 	wg.Wait()
-	fmt.Printf("%dx Workers found a total of %d valid Links:\n%+v\n\n", crawler.nWorkers, len(crawler.crawledLinks), crawler.crawledLinks)
+	fmt.Printf("%dx Workers found a total of %d valid Links:\n%+v\n\n", crawler.nWorkers, len(crawler.outputLinks), crawler.outputLinks)
 }
 
-func crawlLink(crawledLinksChannel, pendingLinkChannel chan string, pendingCountChannel chan int) []string {
+func (cwl *WebCrawler) CrawlLinks() []string {
 	links := []string{}
-	for link := range pendingLinkChannel {
-		inspectURLContent(crawler.initialURL, link, crawledLinksChannel)
-		pendingCountChannel <- -1
+	for link := range cwl.pendingURLChannel {
+		inspectURLContent(cwl, link)
+		cwl.pendingCountChannel <- -1
 		links = append(links, link)
 	}
 	return links
 }
 
-func linkHandler(crawledLinksChannel, pendingLinkChannel chan string, pendingCountChannel chan int) {
+func (cwl *WebCrawler) LinkHandler() {
 	alreadyCrawled := make(map[string]bool)
 
-	for link := range crawledLinksChannel {
+	for link := range cwl.crawledLinksChannel {
 		if !alreadyCrawled[link] {
 			// mark as crawled
 			alreadyCrawled[link] = true
-			//fmt.Println(link)
 			// send it to start crawling it
-			pendingCountChannel <- 1
-			pendingLinkChannel <- link
+			cwl.pendingCountChannel <- 1
+			cwl.pendingURLChannel <- link
 		}
 	}
 
 }
 
-func countDownAndCloseChannels(pendingCountChannel chan int) bool {
+func (cwl *WebCrawler) CountDown() bool {
 	count := 0
-	for c := range pendingCountChannel {
+	for c := range cwl.pendingCountChannel {
 		count += c
 		// If there are not more pending, then Close
 		if count == 0 {

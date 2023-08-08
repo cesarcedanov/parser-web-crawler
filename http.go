@@ -16,8 +16,8 @@ func initClient() *http.Client {
 }
 
 // getContentFromURL get the URLs content
-func getContentFromURL(url string) (*http.Response, error) {
-	response, err := crawler.client.Get(url)
+func getContentFromURL(client *http.Client, url string) (*http.Response, error) {
+	response, err := client.Get(url)
 	if err != nil {
 		fmt.Printf("Error while getting the Content from URL (%s) due to: %s", url, err)
 		return nil, err
@@ -27,8 +27,8 @@ func getContentFromURL(url string) (*http.Response, error) {
 
 // inspectURLContent will connect to the URL
 // and inspect the HTML Content to extract link
-func inspectURLContent(initialURL, currentLink string, crawledLinksChannel chan string) {
-	response, err := getContentFromURL(currentLink)
+func inspectURLContent(crawler *WebCrawler, currentLink string) {
+	response, err := getContentFromURL(crawler.client, currentLink)
 	if err != nil {
 		fmt.Printf("%s - Error: %s", "inpectURLContent", err)
 		return
@@ -46,13 +46,13 @@ func inspectURLContent(initialURL, currentLink string, crawledLinksChannel chan 
 		token := z.Token()
 
 		if isStartAnchorToken(token, tokenType) {
-			link := extractLinkFromToken(token, initialURL)
+			link := extractLinkFromToken(token, crawler.initialURL)
 
 			// Append into the queue of link
 			// Then send it to the Channel to Crawl them too
 			if link != "" {
 				go func() {
-					crawledLinksChannel <- link
+					crawler.crawledLinksChannel <- link
 				}()
 			}
 		}
