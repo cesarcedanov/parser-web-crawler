@@ -7,6 +7,7 @@ import (
 	"sync"
 )
 
+// WebCrawler contains all the data needed to crawl the web URL
 type WebCrawler struct {
 	client              *http.Client
 	initialURL          string
@@ -18,6 +19,7 @@ type WebCrawler struct {
 	mx                  sync.Mutex
 }
 
+// NewWebCrawler return a new WebCrawler with a default/custom config
 func NewWebCrawler() *WebCrawler {
 	var url string
 	var nWorkers int
@@ -36,6 +38,7 @@ func NewWebCrawler() *WebCrawler {
 	}
 }
 
+// Run start crawling
 func (cwl *WebCrawler) Run() {
 
 	go func() {
@@ -70,6 +73,7 @@ func (cwl *WebCrawler) Run() {
 	fmt.Printf("%dx Workers found a total of %d valid Links:\n%+v\n\n", crawler.nWorkers, len(crawler.outputLinks), crawler.outputLinks)
 }
 
+// CrawlLinks will inspect the URL from the pending URL channel
 func (cwl *WebCrawler) CrawlLinks() []string {
 	links := []string{}
 	for link := range cwl.pendingURLChannel {
@@ -80,6 +84,7 @@ func (cwl *WebCrawler) CrawlLinks() []string {
 	return links
 }
 
+// LinkHandler filter the crawled link and marked them as Read
 func (cwl *WebCrawler) LinkHandler() {
 	alreadyCrawled := make(map[string]bool)
 
@@ -95,6 +100,7 @@ func (cwl *WebCrawler) LinkHandler() {
 
 }
 
+// CountDown will monitor and notify when to close channels
 func (cwl *WebCrawler) CountDown() bool {
 	count := 0
 	for c := range cwl.pendingCountChannel {
